@@ -1,0 +1,329 @@
+-- โหลด Rayfield UI Library
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Lighting = game:GetService("Lighting")
+local Camera = workspace.CurrentCamera
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- สร้าง Window
+local Window = Rayfield:CreateWindow({
+   Name = "DOORS | Persistent Alert & Real Door Hub",
+   LoadingTitle = "กำลังโหลดระบบแจ้งเตือนปีศาจ (หายตามปีศาจ)...",
+   LoadingSubtitle = "by Gemini",
+   ConfigurationSaving = { Enabled = false },
+   KeySystem = false
+})
+
+-- สร้างแท็บเมนู
+local MainTab = Window:CreateTab("ESP & เลขประตู", 4483362458)
+local HelperTab = Window:CreateTab("ฟังก์ชันเสริม (Helpers)", 6023426915)
+local CameraTab = Window:CreateTab("ตั้งค่ากล้อง", 6034292881)
+local CharacterTab = Window:CreateTab("ตั้งค่าตัวละคร", 6014266601)
+
+-- ตัวแปรสถานะ ESP
+local PlayerESP_Enabled = false
+local MonsterESP_Enabled = false
+local RoomItemESP_Enabled = false
+local PuzzleItemESP_Enabled = false
+local HideoutESP_Enabled = false
+local SeekPath_Enabled = false
+local AlertSystem_Enabled = false
+
+-- ตัวแปรสถานะ Helper & Bypass
+local AutoInteract_Enabled = false
+local InfiniteStamina_Enabled = false
+local NightVision_Enabled = false
+
+local WalkSpeedEnabled = false
+local CustomWalkSpeed = 16
+
+-- ตารางบันทึกปีศาจที่กำลังอยู่และสถานะการเตือน
+local activeMonsters = {}
+
+-- 🚪 ส่วนแสดงเลขห้องปัจจุบันด้านบนสุด
+local DoorCounterParagraph = MainTab:CreateParagraph({
+   Title = "🚪 สถานะห้อง / ประตูจริงปัจจุบัน",
+   Content = "กำลังตรวจสอบเลขห้อง..."
+})
+
+-- 🚨 ส่วนแสดงสถานะการแจ้งเตือนปีศาจแบบเรียลไทม์ (เตือนค้างจนกว่าปีศาจจะหาย)
+local MonsterAlertParagraph = MainTab:CreateParagraph({
+   Title = "🚨 สถานะการเตือนภัยปีศาจ",
+   Content = "✅ ปลอดภัย (ยังไม่มีปีศาจ)"
+})
+
+-- ฟังก์ชันใส่ Highlight แบบแยกแท็กกันซ้อนทับ
+local function applyCustomHighlight(object, color, tag)
+    if not object or not object.Parent then return end
+    local highlightName = "Highlight_" .. tag
+    if not object:FindFirstChild(highlightName) then
+        for _, child in pairs(object:GetChildren()) do
+            if child:IsA("Highlight") and child.Name ~= highlightName then
+                child:Destroy()
+            end
+        end
+        
+        local highlight = Instance.new("Highlight")
+        highlight.Name = highlightName
+        highlight.FillColor = color
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.FillTransparency = 0.4
+        highlight.OutlineTransparency = 0.1
+        highlight.Adornee = object
+        highlight.Parent = object
+    end
+end
+
+-- ฟังก์ชันใส่ Billboard แสดงชื่อและเลขประตู
+local function applyCustomBillboard(object, text, color, tag)
+    if not object or not object.Parent then return end
+    local boardName = "Billboard_" .. tag
+    if not object:FindFirstChild(boardName) then
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = boardName
+        billboard.Size = UDim2.new(0, 180, 0, 40)
+        billboard.StudsOffset = Vector3.new(0, 3, 0)
+        billboard.AlwaysOnTop = true
+        
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Name = "ESPText"
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.TextColor3 = color
+        textLabel.TextStrokeTransparency = 0
+        textLabel.TextSize = 13
+        textLabel.Font = Enum.Font.SourceSansBold
+        textLabel.Text = text
+        textLabel.Parent = billboard
+        
+        billboard.Adornee = object
+        billboard.Parent = object
+    end
+end
+
+-- เสียงเตือนภัย (ID: 126105529228330)
+local function playAlertSound()
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://126105529228330"
+    sound.Volume = 2
+    sound.Parent = game:GetService("SoundService")
+    sound:Play()
+    game:GetService("Debris"):AddItem(sound, 3)
+end
+
+-- --- แท็บ 1: ESP & เลขประตู ---
+MainTab:CreateToggle({ Name = "มองเห็นผู้เล่น (🟢 สีเขียว)", CurrentValue = false, Callback = function(V) PlayerESP_Enabled = V end })
+MainTab:CreateToggle({ Name = "มองเห็นปีศาจทั้งหมด + Archives / Stairwell (🔴 สีแดง)", CurrentValue = false, Callback = function(V) MonsterESP_Enabled = V end })
+MainTab:CreateToggle({ Name = "🏃‍♂️ เส้นทางหนี Seek (🔵 สีฟ้า)", CurrentValue = false, Callback = function(V) SeekPath_Enabled = V end })
+MainTab:CreateToggle({ Name = "🚨 เปิดเสียงเตือนภัยปีศาจ (ID: 126105...)", CurrentValue = false, Callback = function(V) AlertSystem_Enabled = V end })
+MainTab:CreateToggle({ Name = "🚪 ประตูจริงเท่านั้น + แสดงเลขห้อง (🔵 สีน้ำเงิน)", CurrentValue = false, Callback = function(V) RoomItemESP_Enabled = V end })
+MainTab:CreateToggle({ Name = "🧩 ของแก้ปัญหา / หนังสือ / เบรกเกอร์ (⚪ สีขาว)", CurrentValue = false, Callback = function(V) PuzzleItemESP_Enabled = V end })
+MainTab:CreateToggle({ Name = "📦 ตู้ซ่อนตัว / ล็อกเกอร์ (🟧 สีส้ม)", CurrentValue = false, Callback = function(V) HideoutESP_Enabled = V end })
+
+-- --- แท็บ 2: ฟังก์ชันเสริม (Helpers & Bypass) ---
+HelperTab:CreateToggle({
+   Name = "⚡ Auto Interact (กดเปิดประตู/หยิบของออโต้)",
+   CurrentValue = false,
+   Callback = function(Value) AutoInteract_Enabled = Value end,
+})
+
+HelperTab:CreateToggle({
+   Name = "🏃‍♂️ Infinite Stamina (วิ่งไม่เหนื่อย / ไม่หน่วงสปีด)",
+   CurrentValue = false,
+   Callback = function(Value) InfiniteStamina_Enabled = Value end,
+})
+
+HelperTab:CreateToggle({
+   Name = "🔦 Night Vision (มองเห็นในความมืดสนิท)",
+   CurrentValue = false,
+   Callback = function(Value)
+      NightVision_Enabled = Value
+      if Value then
+         local ambientLight = Instance.new("PointLight")
+         ambientLight.Name = "VisionLight"
+         ambientLight.Range = 60
+         ambientLight.Brightness = 2
+         ambientLight.Parent = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+      else
+         if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local light = LocalPlayer.Character.HumanoidRootPart:FindFirstChild("VisionLight")
+            if light then light:Destroy() end
+         end
+      end
+   end,
+})
+
+-- --- แท็บ 3: ตั้งค่ากล้อง ---
+CameraTab:CreateSlider({ Name = "ปรับมุมมอง FOV", Range = {70, 120}, Increment = 1, CurrentValue = 70, Callback = function(V) Camera.FieldOfView = V end })
+CameraTab:CreateToggle({ Name = "💡 เปิดไฟสว่างปลอดภัย (Fullbright Safe)", CurrentValue = false, Callback = function(V) Lighting.Ambient = V and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(128, 128, 128) end })
+
+-- --- แท็บ 4: ตั้งค่าตัวละคร ---
+CharacterTab:CreateToggle({ Name = "🚀 เปิดความเร็วเดิน (WalkSpeed)", CurrentValue = false, Callback = function(V) WalkSpeedEnabled = V end })
+CharacterTab:CreateSlider({ Name = "ระดับความเร็ว", Range = {16, 80}, Increment = 1, CurrentValue = 16, Callback = function(V) CustomWalkSpeed = V end })
+
+local entityKeywords = {
+    "rush", "ambush", "figure", "eyes", "seek", "screech", "glitch", "halt", "depths", "silence", 
+    "a-60", "a-90", "a-120", "a-200", "v-120", "monster", "entity", "chaser",
+    "honcho", "bash", "drone", "forget-me-not", "teller", "scribbles", "ransom", "alma", "fih", "portrait", "meld"
+}
+
+-- ระบบ Anti-Rubberband และ Helpers ทำงานทุกเฟรม (Heartbeat)
+RunService.Heartbeat:Connect(function()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Humanoid") and char:FindFirstChild("HumanoidRootPart") then
+        local humanoid = char.Humanoid
+        local rootPart = char.HumanoidRootPart
+
+        if WalkSpeedEnabled then
+            humanoid.WalkSpeed = CustomWalkSpeed
+            if humanoid.MoveDirection.Magnitude > 0 then
+                rootPart.Velocity = Vector3.new(humanoid.MoveDirection.X * CustomWalkSpeed, rootPart.Velocity.Y, humanoid.MoveDirection.Z * CustomWalkSpeed)
+            end
+        end
+
+        if InfiniteStamina_Enabled then
+            pcall(function()
+                local stamina = char:FindFirstChild("Stamina") or LocalPlayer:FindFirstChild("Stamina")
+                if stamina then stamina.Value = 100 end
+            end)
+        end
+
+        if AutoInteract_Enabled then
+            pcall(function()
+                for _, obj in pairs(workspace:GetDescendants()) do
+                    if obj:IsA("ProximityPrompt") then
+                        if (obj.Parent.Position - rootPart.Position).Magnitude <= obj.MaxActivationDistance then
+                            fireproximityprompt(obj)
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- Background Loop สแกนวัตถุและตรวจจับมอนสเตอร์
+task.spawn(function()
+    while task.wait(0.4) do
+        -- 1. อัปเดตเลขห้องจริงปัจจุบัน
+        pcall(function()
+            local currentRoomNum = 0
+            if ReplicatedStorage:FindFirstChild("GameData") and ReplicatedStorage.GameData:FindFirstChild("LatestRoom") then
+                currentRoomNum = ReplicatedStorage.GameData.LatestRoom.Value
+            elseif workspace:FindFirstChild("CurrentRooms") then
+                currentRoomNum = #workspace.CurrentRooms:GetChildren()
+            elseif workspace:FindFirstChild("Rooms") then
+                currentRoomNum = #workspace.Rooms:GetChildren()
+            end
+            
+            if currentRoomNum > 0 then
+                DoorCounterParagraph:Set("🚪 ห้อง / ประตูจริงปัจจุบัน: " .. tostring(currentRoomNum))
+            else
+                DoorCounterParagraph:Set("🚪 สถานะ: กำลังตรวจสอบเลขห้อง...")
+            end
+        end)
+
+        -- 2. ตรวจสอบการคงอยู่ของปีศาจ (ถ้าปีศาจหายไป ให้ยกเลิกการเตือน)
+        local detectedMonstersThisLoop = {}
+        
+        -- 3. สแกนวัตถุในแมพ
+        local scanTargets = {}
+        if workspace:FindFirstChild("CurrentRooms") then table.insert(scanTargets, workspace.CurrentRooms) end
+        if workspace:FindFirstChild("Rooms") then table.insert(scanTargets, workspace.Rooms) end
+        if workspace:FindFirstChild("Archives") then table.insert(scanTargets, workspace.Archives) end
+        if workspace:FindFirstChild("Stairwell") then table.insert(scanTargets, workspace.Stairwell) end
+        if workspace:FindFirstChild("Map") then table.insert(scanTargets, workspace.Map) end
+        table.insert(scanTargets, workspace)
+
+        for _, folder in pairs(scanTargets) do
+            for _, obj in pairs(folder:GetDescendants()) do
+                if obj:IsA("Model") or obj:IsA("BasePart") then
+                    local nameLower = obj.Name:lower()
+
+                    -- 🔴 ตรวจจับปีศาจ
+                    local isMonster = false
+                    for _, kw in ipairs(entityKeywords) do
+                        if nameLower:find(kw) then isMonster = true break end
+                    end
+                    
+                    if isMonster then
+                        table.insert(detectedMonstersThisLoop, obj.Name)
+                        
+                        if MonsterESP_Enabled then
+                            applyCustomHighlight(obj, Color3.fromRGB(255, 0, 0), "Monster")
+                            applyCustomBillboard(obj, obj.Name, Color3.fromRGB(255, 50, 50), "Monster")
+                        end
+
+                        -- ส่งเสียงเตือนเมื่อพบครั้งแรก
+                        if AlertSystem_Enabled and not activeMonsters[obj] then
+                            activeMonsters[obj] = true
+                            playAlertSound()
+                        end
+                    end
+
+                    -- 🔵 ประตูจริง + ดึงเลขห้องมาแสดง (กรองประตูหลอก Dupe / Fake ออก)
+                    if RoomItemESP_Enabled then
+                        local isRealDoor = (nameLower:find("door") or nameLower:find("key") or nameLower:find("lever") or nameLower:find("padlock") or nameLower:find("flare"))
+                        local isFakeDoor = (nameLower:find("dupe") or nameLower:find("fake"))
+
+                        if isRealDoor and not isFakeDoor then
+                            local roomNumberText = "Door"
+                            local p = obj.Parent
+                            while p and p ~= workspace do
+                                if tonumber(p.Name) then
+                                    roomNumberText = "Door #" .. p.Name
+                                    break
+                                end
+                                p = p.Parent
+                            end
+
+                            applyCustomHighlight(obj, Color3.fromRGB(0, 102, 255), "Door")
+                            applyCustomBillboard(obj, roomNumberText, Color3.fromRGB(0, 102, 255), "Door")
+                        end
+                    end
+
+                    -- ⚪ ของแก้ปัญหา / หนังสือ / เบรกเกอร์ (สีขาว)
+                    if PuzzleItemESP_Enabled and (nameLower:find("book") or nameLower:find("paper") or nameLower:find("breaker") or nameLower:find("fuse") or nameLower:find("code") or nameLower:find("battery") or nameLower:find("valve") or nameLower:find("puzzle") or nameLower:find("storage box") or nameLower:find("briefcase")) then
+                        applyCustomHighlight(obj, Color3.fromRGB(255, 255, 255), "Puzzle")
+                        applyCustomBillboard(obj, obj.Name, Color3.fromRGB(255, 255, 255), "Puzzle")
+                    end
+
+                    -- 🟧 ตู้ซ่อนตัว / ล็อกเกอร์ (สีส้ม)
+                    if HideoutESP_Enabled and (nameLower:find("closet") or nameLower:find("locker") or nameLower:find("wardrobe") or nameLower:find("bed") or nameLower:find("hide")) then
+                        applyCustomHighlight(obj, Color3.fromRGB(255, 140, 0), "Hideout")
+                        applyCustomBillboard(obj, obj.Name, Color3.fromRGB(255, 140, 0), "Hideout")
+                    end
+
+                    -- 🔵 เส้นทาง Seek (สีฟ้า)
+                    if SeekPath_Enabled and (nameLower:find("seekpath") or nameLower:find("pathnode") or nameLower:find("chase")) then
+                        applyCustomHighlight(obj, Color3.fromRGB(0, 255, 255), "SeekPath")
+                    end
+                end
+            end
+        end
+
+        -- 4. ล้างค่ามอนสเตอร์ที่หายไปออกจากความจำ (ถ้าปีศาจไม่อยู่แล้ว การเตือนจะหายไปทันที)
+        for entityObj, _ in pairs(activeMonsters) do
+            if not entityObj or not entityObj.Parent then
+                activeMonsters[entityObj] = nil
+            end
+        end
+
+        -- 5. อัปเดตกล่องแจ้งเตือนปีศาจบนหน้าจอ UI
+        if #detectedMonstersThisLoop > 0 then
+            MonsterAlertParagraph:Set("⚠️ คำเตือน: พบปีศาจ (" .. table.concat(detectedMonstersThisLoop, ", ") .. ") กำลังอยู่ในแมพ!")
+        else
+            MonsterAlertParagraph:Set("✅ ปลอดภัย (ยังไม่มีปีศาจในขณะนี้)")
+        end
+    end
+end)
+
+Rayfield:Notify({
+   Title = "อัปเดตระบบการแจ้งเตือนปีศาจเรียบร้อย!",
+   Content = "ป้ายการเตือนจะแสดงค้างไว้จนกว่าปีศาจจะหายไปจากแมพ",
+   Duration = 3,
+   Image = 4483362458,
+})
